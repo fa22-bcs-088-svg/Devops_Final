@@ -1,0 +1,263 @@
+---
+- name: Deploy Next.js Application with Docker
+  hosts: web
+  become: yes
+  vars:
+    app_dir: /opt/nextjs-app
+    postgres_user: myuser
+    postgres_password: "mypassword123"
+    postgres_db: mydatabase
+    secret_key: "my-secret-key-12345"
+    next_public_safe_key: safe-key
+
+  tasks:
+    # ============================================
+    # Task 1: Update System Packages
+    # ============================================
+    - name: Update apt package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+
+    # ============================================
+    # Task 2: Install System Dependencies
+    # ============================================
+    - name: Install required system packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - git
+          - python3-pip
+          - python3-setuptools
+        state: present
+        update_cache: yes
+
+    # ============================================
+    # Task 3: Install Docker
+    # ============================================
+    - name: Add Docker GPG key
+      shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/docker-archive-keyring.gpg
+
+    - name: Add Docker repository
+      shell: |
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add current user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # ============================================
+    # Task 4: Install Docker Compose (standalone for compatibility)
+    # ============================================
+    - name: Check if docker-compose standalone exists
+      stat:
+        path: /usr/local/bin/docker-compose
+      register: docker_compose_binary
+
+    - name: Download Docker Compose standalone
+      ansible.builtin.get_url:
+        url: "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+      when: not docker_compose_binary.stat.exists
+
+    - name: Create symlink for docker-compose
+      file:
+        src: /usr/local/bin/docker-compose
+        dest: /usr/bin/docker-compose
+        state: link
+      when: not docker_compose_binary.stat.exists
+
+    # ============================================
+    # Task 5: Clone or Update Application Repository
+    # ============================================
+    - name: Check if application directory exists
+      stat:
+        path: "{{ app_dir }}"
+      register: app_dir_stat
+
+    - name: Clone application repository
+      git:
+        repo: https://github.com/fa22-bcs-088-svg/next-self-host.git
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+      when: not app_dir_stat.stat.exists
+
+    - name: Update application repository
+      git:
+        repo: https://github.com/fa22-bcs-088-svg/next-self-host.git
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+      when: app_dir_stat.stat.exists
+
+    # ============================================
+    # Task 6: Deploy Application Configuration and Secrets
+    # ============================================
+    - name: Create .env file with database credentials
+      copy:
+        dest: "{{ app_dir }}/.env"
+        content: |
+          # PostgreSQL Database Configuration
+          POSTGRES_USER={{ postgres_user }}
+          POSTGRES_PASSWORD={{ postgres_password }}
+          POSTGRES_DB={{ postgres_db }}
+          
+          # Database URLs
+          DATABASE_URL=postgres://{{ postgres_user }}:{{ postgres_password }}@db:5432/{{ postgres_db }}
+          DATABASE_URL_EXTERNAL=postgres://{{ postgres_user }}:{{ postgres_password }}@localhost:5432/{{ postgres_db }}
+          
+          # Application Secrets
+          SECRET_KEY={{ secret_key }}
+          NEXT_PUBLIC_SAFE_KEY={{ next_public_safe_key }}
+        mode: '0600'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+
+    - name: Create/Overwrite docker-compose.yml with correct configuration
+      copy:
+        dest: "{{ app_dir }}/docker-compose.yml"
+        content: |
+          version: '3.8'
+          
+          services:
+            db:
+              image: postgres:16-alpine
+              container_name: nextjs-db
+              environment:
+                POSTGRES_USER: ${POSTGRES_USER:-myuser}
+                POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+                POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
+              ports:
+                - "5432:5432"
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-myuser}"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+              networks:
+                - app-network
+          
+            web:
+              build:
+                context: .
+                dockerfile: Dockerfile
+                args:
+                  DATABASE_URL: ${DATABASE_URL}
+              container_name: nextjs-web
+              ports:
+                - "3000:3000"
+              environment:
+                DATABASE_URL: ${DATABASE_URL}
+                POSTGRES_USER: ${POSTGRES_USER:-myuser}
+                POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+                POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
+                SECRET_KEY: ${SECRET_KEY:-my-secret}
+                NEXT_PUBLIC_SAFE_KEY: ${NEXT_PUBLIC_SAFE_KEY:-safe-key}
+              depends_on:
+                db:
+                  condition: service_healthy
+              networks:
+                - app-network
+              restart: unless-stopped
+          
+          volumes:
+            postgres_data:
+          
+          networks:
+            app-network:
+              driver: bridge
+        mode: '0644'
+
+    # ============================================
+    # Task 7: Automate Docker Deployment
+    # ============================================
+    - name: Stop existing containers
+      command: docker-compose down
+      args:
+        chdir: "{{ app_dir }}"
+      ignore_errors: yes
+
+    - name: Build and start Docker containers
+      command: docker-compose up -d --build
+      args:
+        chdir: "{{ app_dir }}"
+      environment:
+        POSTGRES_USER: "{{ postgres_user }}"
+        POSTGRES_PASSWORD: "{{ postgres_password }}"
+        POSTGRES_DB: "{{ postgres_db }}"
+        DATABASE_URL: "postgres://{{ postgres_user }}:{{ postgres_password }}@db:5432/{{ postgres_db }}"
+        SECRET_KEY: "{{ secret_key }}"
+        NEXT_PUBLIC_SAFE_KEY: "{{ next_public_safe_key }}"
+
+    - name: Wait for containers to be healthy
+      wait_for:
+        timeout: 60
+        delay: 10
+
+    - name: Verify containers are running
+      shell: docker ps --filter "name=nextjs"
+      register: container_status
+      changed_when: false
+
+    - name: Display container status
+      debug:
+        msg: "{{ container_status.stdout_lines }}"
+
+    # ============================================
+    # Task 8: Verify Deployment
+    # ============================================
+    - name: Check if web container is accessible
+      uri:
+        url: http://localhost:3000
+        method: GET
+        status_code: [200, 301, 302]
+        timeout: 10
+      register: web_check
+      retries: 5
+      delay: 10
+      ignore_errors: yes
+
+    - name: Display deployment status
+      debug:
+        msg:
+          - "Deployment completed!"
+          - "Next.js application is running on http://localhost:3000"
+          - "PostgreSQL database is running on port 5432"
+          - "Container status: {{ container_status.stdout }}"

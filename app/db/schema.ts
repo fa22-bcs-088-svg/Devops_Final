@@ -12,3 +12,10 @@ export const todos = pgTable('todos', {
   completed: boolean('completed').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const feedback = pgTable('feedback', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  comment: varchar('comment', { length: 1000 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});

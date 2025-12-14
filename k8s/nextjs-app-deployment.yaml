@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: next-app
-        image: eman780/next-self-host:v2
+        image: eman780/next-self-host:v2-test
         ports:
         - containerPort: 3000
         envFrom:

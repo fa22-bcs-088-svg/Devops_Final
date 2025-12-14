@@ -1,96 +1,96 @@
-name: CI/CD Pipeline
-# 1. Trigger Configuration
+# name: CI/CD Pipeline
+# # 1. Trigger Configuration
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
 
-jobs:
-  # Job 1: Build, Test, and Database Check
-  ci_checks:
-    name: Build, Test & DB Check
-    runs-on: ubuntu-latest
+# jobs:
+#   # Job 1: Build, Test, and Database Check
+#   ci_checks:
+#     name: Build, Test & DB Check
+#     runs-on: ubuntu-latest
     
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: test_user
-          POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+#     services:
+#       postgres:
+#         image: postgres:16-alpine
+#         env:
+#           POSTGRES_USER: test_user
+#           POSTGRES_PASSWORD: test_password
+#           POSTGRES_DB: test_db
+#         ports:
+#           - 5432:5432
+#         options: >-
+#           --health-cmd pg_isready
+#           --health-interval 10s
+#           --health-timeout 5s
+#           --health-retries 5
 
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout Repository
+#         uses: actions/checkout@v4
       
-      - name: Setup Bun Runtime
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
+#       - name: Setup Bun Runtime
+#         uses: oven-sh/setup-bun@v1
+#         with:
+#           bun-version: latest
       
-      - name: Install Dependencies
-        run: bun install
+#       - name: Install Dependencies
+#         run: bun install
       
-      - name: Wait for Postgres DB to be Ready
-        run: sleep 5
+#       - name: Wait for Postgres DB to be Ready
+#         run: sleep 5
       
-      # Run tests against the local test database
-      - name: Run Tests
-        run: bun test
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+#       # Run tests against the local test database
+#       - name: Run Tests
+#         run: bun test
+#         env:
+#           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
       
-      # FIX: Corrected indentation for this step
-      - name: Upload test summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-summary
-          path: test-results.xml
+#       # FIX: Corrected indentation for this step
+#       - name: Upload test summary
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: test-summary
+#           path: test-results.xml
           
-      # Build the Next.js application (Crucial Web Deployment Check)
-      - name: Build Next.js Application
-        run: bun run build
-        env:
-          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+#       # Build the Next.js application (Crucial Web Deployment Check)
+#       - name: Build Next.js Application
+#         run: bun run build
+#         env:
+#           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
 
 
-  # Job 2: Build Docker Image and Push to Docker Hub
-  deploy:
-    name: Docker Build & Push
-    runs-on: ubuntu-latest
-    needs: ci_checks
+#   # Job 2: Build Docker Image and Push to Docker Hub
+#   deploy:
+#     name: Docker Build & Push
+#     runs-on: ubuntu-latest
+#     needs: ci_checks
     
-    # Only runs on successful push to main branch
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+#     # Only runs on successful push to main branch
+#     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout Repository
+#         uses: actions/checkout@v4
       
-      # Log in to Docker Hub using GitHub Secrets
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+#       # Log in to Docker Hub using GitHub Secrets
+#       - name: Login to Docker Hub
+#         uses: docker/login-action@v3
+#         with:
+#           username: ${{ secrets.DOCKERHUB_USERNAME }}
+#           password: ${{ secrets.DOCKERHUB_PASSWORD }}
       
-      # Build the image and push it to the remote registry with the 'latest' tag
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          # platforms: linux/amd64,linux/arm64 
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/next-self-host:latest
-          # --- ARGS FOR DOCKER BUILD TO INJECT DATABASE_URL ---
-          build-args: |
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
+#       # Build the image and push it to the remote registry with the 'latest' tag
+#       - name: Build and push Docker image
+#         uses: docker/build-push-action@v5
+#         with:
+#           context: .
+#           # platforms: linux/amd64,linux/arm64 
+#           push: true
+#           tags: ${{ secrets.DOCKERHUB_USERNAME }}/next-self-host:latest
+#           # --- ARGS FOR DOCKER BUILD TO INJECT DATABASE_URL ---
+#           build-args: |
+#             DATABASE_URL=${{ secrets.DATABASE_URL }}

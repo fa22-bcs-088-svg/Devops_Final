@@ -171,6 +171,17 @@ jobs:
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
+      - name: Prepare DATABASE_URL for build
+        id: prepare_db
+        run: |
+          if [ -n "${{ secrets.DATABASE_URL }}" ]; then
+            echo "✅ DATABASE_URL secret is set"
+            echo "db_url=${{ secrets.DATABASE_URL }}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ DATABASE_URL secret not set, using placeholder for build"
+            echo "db_url=postgresql://build_user:build_password@build_host:5432/build_db" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and Push Docker Image (Latest)
         uses: docker/build-push-action@v5
         with:
@@ -180,7 +191,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            DATABASE_URL=${{ steps.prepare_db.outputs.db_url }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max

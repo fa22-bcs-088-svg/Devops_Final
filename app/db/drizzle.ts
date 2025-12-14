@@ -4,9 +4,13 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL environment variable is not set');
+// During build time, use a placeholder URL if DATABASE_URL is not set
+// The actual connection will be established at runtime
+const databaseUrl = process.env.DATABASE_URL || 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
+
+if (!process.env.DATABASE_URL && process.env.NODE_ENV === 'production') {
+  console.warn('⚠️ DATABASE_URL not set, using placeholder. Make sure to set it at runtime.');
 }
 
-export const client = postgres(process.env.DATABASE_URL);
+export const client = postgres(databaseUrl);
 export const db = drizzle(client);
